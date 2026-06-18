@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf  # <--- New Import
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -7,6 +8,34 @@ import pandas as pd
 st.set_page_config(page_title="Valuation Engine", layout="wide")
 st.title("Stock Valuation Engine")
 st.markdown("A tool utilizing both popular and highly accurate financial models to estimate intrinsic value.")
+
+# ==========================================
+# LIVE MARKET DATA INTEGRATION
+# ==========================================
+st.sidebar.header("Live Market Data")
+# Defaulting to Anglo American on the JSE for testing
+ticker_symbol = st.sidebar.text_input("Enter Ticker Symbol (e.g., AGL.JO, AAPL)", value="AGL.JO")
+
+@st.cache_data(ttl=3600)  # Caches the data for 1 hour so you don't spam the API
+def get_live_data(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        # Use .get() to avoid crashing if a data point is missing
+        price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
+        beta = info.get('beta', 1.0)
+        ebitda = info.get('ebitda', 0.0)
+        return price, beta, ebitda
+    except Exception:
+        return None, None, None
+
+live_price, live_beta, live_ebitda = get_live_data(ticker_symbol)
+
+if live_price:
+    st.sidebar.success(f"**Live Price:** {live_price:,.2f}")
+    st.sidebar.info(f"**Market Beta:** {live_beta}")
+else:
+    st.sidebar.error("Could not fetch data. Check ticker symbol.")
 
 # ==========================================
 # SIDEBAR NAVIGATION
@@ -67,7 +96,7 @@ elif model_choice == "2. EV/EBITDA Multiple":
         st.metric(label="Implied Equity Value", value=f"R {equity_value:,.2f}")
 
 # ==========================================
-# MODEL 3: P/E Multiple
+# MODEL 3: P/E Multiple (Upgraded with API)
 # ==========================================
 elif model_choice == "3. P/E Multiple":
     st.header("3. Price-to-Earnings (P/E) Multiple")
@@ -78,7 +107,20 @@ elif model_choice == "3. P/E Multiple":
     if st.button("Calculate Target Share Price"):
         target_price = eps * pe_ratio
         st.metric(label="Implied Share Price", value=f"R {target_price:,.2f}")
-
+        
+        # --- NEW API INSIGHT LOGIC ---
+        if live_price and live_price > 0:
+            st.markdown("### Market Assessment")
+            margin_of_safety = ((target_price - live_price) / target_price) * 100
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(label="Current Market Price", value=f"R {live_price:,.2f}")
+            with col2:
+                if target_price > live_price:
+                    st.success(f"**UNDERVALUED** - Trading at a {margin_of_safety:.1f}% discount to implied value.")
+                else:
+                    st.error(f"**OVERVALUED** - Trading at a {abs(margin_of_safety):.1f}% premium to implied value.")
 # ==========================================
 # MODEL 4: Adjusted Present Value (APV)
 # ==========================================
